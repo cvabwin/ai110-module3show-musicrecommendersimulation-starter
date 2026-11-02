@@ -122,7 +122,15 @@ The attributes in `data/songs.csv` support several point-weighting strategies. E
 
 These are design alternatives, not measured experiment results. The final recipe preserves the earlier 4:2:3:1 proportions at half the point scale, so its rankings are unchanged. Weights belong in the scoring rule rather than in the CSV: song attributes stay fixed, while a song's score depends on the user's profile.
 
-The finalized scoring rule evaluates one song using these weights:
+### Finalized Algorithm Recipe
+
+1. Read the songs from `data/songs.csv` and the user's genre, mood, energy, and acoustic preferences.
+2. Loop through every song, starting its score at zero. Apply the four scoring rules below and record the reasons for its points.
+3. Save each song with its total score and reasons.
+4. Sort all songs by total score from highest to lowest, breaking ties by lower song ID. Use full precision when sorting.
+5. Return the top `k` songs (5 by default), or all songs if fewer are available, with their scores and explanations.
+
+For each song, use these finalized weights:
 
 | Feature | Rule | Maximum points |
 | --- | --- | --- |
@@ -139,6 +147,37 @@ The ranking rule scores every song, sorts the songs by total score from highest 
 
 We need both rules because scoring measures how well one song fits the user, while ranking compares those scores to choose a list of recommendations. Following clean code principles, scoring and ranking should have separate responsibilities, and weights should use named constants so they are easy to understand and adjust.
 
+### Expected biases
+
+This system may over-prioritize genre because a genre match earns twice as many points as a mood match, pushing down great songs from other genres that fit the user's mood. Exact genre and mood labels also miss similarities such as "chill" versus "relaxed." The small catalog gives some tastes more choices than others: lofi has three songs, while many genres have only one. When enabled, the acousticness bonus favors acoustic recordings even though electronic music can also suit studying. These are expected limitations of the design, not findings from completed evaluation.
+
+### Visualize the design: data flow
+
+This map is a planning aid for the scoring and ranking logic before implementation.
+
+```mermaid
+flowchart TD
+    A["INPUT: User preferences<br/>Favorite genre, favorite mood,<br/>target energy, likes acoustic, and K"]
+    B["Read data/songs.csv into a song list"]
+    C["PROCESS: Take the next song"]
+    D["Judge this song against user preferences<br/>Genre match: +2.0<br/>Mood match: +1.0<br/>Energy: 1.5 × similarity<br/>Acoustic bonus: 0.5 × acousticness if requested"]
+    E["Save song, total score, and reasons"]
+    F{"More songs?"}
+    G["RANKING: Sort all scored songs<br/>Highest score first; lower ID breaks ties"]
+    H["OUTPUT: Top K recommendations<br/>Song title, score, and explanation"]
+    A --> D
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F -- Yes --> C
+    F -- No --> G
+    G --> H
+    A -- K --> H
+```
+
+For example, the CSV row for **Midnight Coding** becomes one song in the loop. With the study profile above (lofi, chill, target energy 0.40, acoustic preference enabled), it earns `2.0 + 1.0 + 1.47 + 0.355 = 4.825` points. Save that song with its score and reasons, then repeat for every remaining song. Only after all songs are scored do we sort the full list and select the top K; Midnight Coding appears in the output if its rank is within K.
+
 ---
 
 ## Getting Started
@@ -151,6 +190,7 @@ We need both rules because scoring measures how well one song fits the user, whi
    python -m venv .venv
    source .venv/bin/activate      # Mac or Linux
    .venv\Scripts\activate         # Windows
+   ```
 
 2. Install dependencies
 
@@ -178,18 +218,51 @@ You can add more tests in `tests/test_recommender.py`.
 
 ## Sample Recommendation Output
 
-Paste a sample of your recommender's output here as a text block so a reader can see what it produces:
+Running `python -m src.main` from the project root produces:
 
-```
-# e.g.:
-# User profile: genre=indie, mood=chill, energy=low
-# Recommendations:
-#   1. ...
-#   2. ...
-#   3. ...
+```text
+============================================================
+MUSIC RECOMMENDER
+============================================================
+Loaded songs: 18
+Profile: genre=pop | mood=happy | energy=0.80
+
+Top 5 recommendations
+------------------------------------------------------------
+1. Sunrise City - Neon Echo
+   Final score: 4.470
+   Reasons:
+     - genre match (+2.0)
+     - mood match (+1.0)
+     - energy similarity (+1.470)
+
+2. Gym Hero - Max Pulse
+   Final score: 3.305
+   Reasons:
+     - genre match (+2.0)
+     - energy similarity (+1.305)
+
+3. Rooftop Lights - Indigo Parade
+   Final score: 2.440
+   Reasons:
+     - mood match (+1.0)
+     - energy similarity (+1.440)
+
+4. Concrete Crown - Verse Atlas
+   Final score: 1.485
+   Reasons:
+     - energy similarity (+1.485)
+
+5. Night Drive Loop - Neon Echo
+   Final score: 1.425
+   Reasons:
+     - energy similarity (+1.425)
 ```
 
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or demo video link here -->
+Sunrise City ranks first because it matches both pop and happy, with energy
+0.82 close to the target of 0.80. Gym Hero matches pop but not happy, while
+Rooftop Lights matches happy but not pop, so they rank second and third.
+Scores are rounded to three decimal places for display; ranking uses full precision.
 
 ---
 
