@@ -1,43 +1,94 @@
 # AI Interactions Log
 
-> **Stretch features only.** Only fill in the sections that apply to stretch features you attempted. If you did not attempt a stretch feature, leave its section blank or delete it. This file is not required for the core project.
-
----
+This log records the AI-assisted work completed in this project.
+The agent was Codex. The main stretch work was the agentic workflow,
+diversity penalties, and a visual terminal table.
+A separate design-pattern stretch feature was not implemented.
 
 ## Agentic Workflow (SF8)
 
-> Document your experience using an AI agent (e.g., Cursor Agent, Claude, Copilot) to make multi-step changes autonomously.
-
 **What task did you give the agent?**
 
-<!-- Describe the goal you asked the agent to accomplish -->
+I asked Codex to test different user profiles, run a weight experiment,
+explain limitations, and complete the project documentation.
+I also asked it to implement diversity penalties and a readable terminal table.
+The agent read the local files, edited the code, ran commands, and checked the results.
 
 **Prompts used:**
 
-<!-- Paste the key prompts you gave the agent -->
+These are excerpts from my project requests:
+
+> Define at least three distinct user preference dictionaries.
+
+> Double the importance of energy and half the importance of genre.
+
+> Implement a "Diversity Penalty" that prevents the recommender from suggesting too many songs from the same artist or genre in the top results.
+
+> Ensure your prompt specifies that the table must include the "reasons" for each score.
+
+> Please complete any sections not completed in README.md and model_card.md.
+
+The README also preserves reusable prompts for the diversity rule and table formatting.
 
 **What did the agent generate or change?**
 
-<!-- List the files edited, code generated, or commands run -->
+- `src/main.py`: Added seven named profiles, including boundary and missing-label cases.
+  Added an ASCII table with ranks, songs, artists, adjusted scores, and reasons.
+- `src/recommender.py`: Changed the genre bonus from 2 to 1 and the energy weight
+  from 1.5 to 3. Added penalties of 1 point per earlier artist match and 0.5 points
+  per earlier genre match. Connected the class interface to the shared functions.
+- `tests/test_scoring.py`: Updated expected scores for the new weights.
+- `tests/test_ranking.py`: Kept checks for ranking, explanations, and tie handling.
+  Used zero penalties when checking the earlier preference-only ranking.
+- `tests/test_diversity.py`: Added checks for cumulative penalties, label normalization,
+  input preservation, invalid penalty weights, and the class interface.
+- `README.md` and `model_card.md`: Added explanations, experiment results,
+  fenced terminal output, limitations, future work, and reflections.
+
+The agent ran the recommender with all seven profiles.
+It also ran the test suite with the project's virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+The latest test run passed all 34 tests.
 
 **What did you verify or fix manually?**
 
-<!-- Describe anything the agent got wrong or that required human review -->
+I listened to the music to test whether it felt like a good fit for the assigned categories.
+This was a subjective check based on my own listening experience.
+It helped me evaluate the category labels beyond the numerical scores and automated tests.
+My impressions reflect my own taste, so other listeners may judge the fit differently.
+I also ran manually ran pytests.
 
----
+## Diversity and Fairness Logic
 
-## Design Pattern (SF10)
+AI helped turn the request for variety into a concrete rule.
+The recommender chooses one song at a time and penalizes candidates whose
+artist or genre is already represented.
+It recalculates deductions from each song's original preference score before every choice.
+Repeats remain possible, so this encourages variety rather than enforcing a strict quota.
 
-> Document how AI helped you choose or implement a design pattern.
+For Chill Lofi, the top five changed from four artists and three genres to
+five artists and four genres.
+Focus Flow lost points for repeating LoRoom and lofi, allowing Desert Compass to enter.
+This increased variety, but did not prove fairness for every listener.
 
-**Which design pattern did you use?**
+## Visual Summary Table
 
-<!-- e.g., Strategy, Factory, Observer, etc. -->
+AI helped format the output with Python's standard library.
+The table includes Rank, Song, Artist, Score, and Reasons columns.
+Long text wraps, and each scoring contribution or penalty stays visible.
+No extra table library was added.
+Checks covered all seven profiles, long text, and an empty result list.
 
-**How did AI help you brainstorm or implement it?**
+## What I Learned from Using AI
 
-<!-- Describe the conversation or suggestions that led to your decision -->
-
-**How does the pattern appear in your final code?**
-
-<!-- Point to the relevant class or method -->
+AI helped connect several steps: changing code, running experiments, checking results,
+and explaining the behavior in the documentation.
+The biggest lesson was to compare its explanations with actual outputs.
+For example, a larger score after a weight change does not prove better recommendations.
+I also learned to distinguish more variety from fairness and to keep old experiment
+results separate from descriptions of the current system.

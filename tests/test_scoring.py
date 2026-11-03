@@ -14,17 +14,17 @@ def test_study_profile_matches_recipe_examples():
 
     score, reasons = score_song(profile, songs[1])
 
-    assert score == pytest.approx(4.825)
+    assert score == pytest.approx(5.295)
     assert reasons == [
-        "genre match (+2.0)",
+        "genre match (+1.0)",
         "mood match (+1.0)",
-        "energy similarity (+1.470)",
+        "energy similarity (+2.940)",
         "acoustic preference (+0.355)",
     ]
-    assert score_song(profile, songs[2])[0] == pytest.approx(0.785)
+    assert score_song(profile, songs[2])[0] == pytest.approx(1.520)
 
 
-@pytest.mark.parametrize("energy, expected", [(0.0, 1.5), (0.5, 0.75), (1.0, 0.0)])
+@pytest.mark.parametrize("energy, expected", [(0.0, 3.0), (0.5, 1.5), (1.0, 0.0)])
 def test_energy_rewards_closeness_without_category_or_acoustic_bonus(energy, expected):
     profile = {"genre": "pop", "mood": "happy", "energy": 0.0}
     song = {"genre": "rock", "mood": "intense", "energy": energy, "acousticness": 1.0}
@@ -39,7 +39,7 @@ def test_perfect_match_earns_maximum_score():
     profile = {"genre": "pop", "mood": "happy", "energy": 0.8, "likes_acoustic": True}
     song = {"genre": " POP ", "mood": " Happy ", "energy": 0.8, "acousticness": 1.0}
 
-    assert score_song(profile, song)[0] == pytest.approx(5.0)
+    assert score_song(profile, song)[0] == pytest.approx(5.5)
 
 
 @pytest.mark.parametrize("value", [-0.1, 1.1, float("nan")])

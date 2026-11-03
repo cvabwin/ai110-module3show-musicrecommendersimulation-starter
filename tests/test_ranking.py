@@ -7,7 +7,7 @@ from src.recommender import load_songs, recommend_songs, score_song
 
 
 def test_scores_every_song_once_and_ranks_before_selecting():
-    songs = [{"id": 3}, {"id": 2}, {"id": 1}, {"id": 4}]
+    songs = [{"id": i, "artist": str(i), "genre": str(i)} for i in (3, 2, 1, 4)]
     original = deepcopy(songs)
     # A small score difference must outrank the ID tie-breaker.
     with patch("src.recommender.score_song", side_effect=[
@@ -29,7 +29,7 @@ def test_catalog_recommendations_include_scores_and_explanations():
     songs = load_songs("data/songs.csv")
     prefs = {"genre": "pop", "mood": "happy", "energy": 0.8}
 
-    results = recommend_songs(prefs, songs)
+    results = recommend_songs(prefs, songs, artist_penalty=0, genre_penalty=0)
 
     assert len(results) == 5
     assert results[0][0]["title"] == "Sunrise City"

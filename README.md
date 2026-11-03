@@ -2,16 +2,23 @@
 
 ## Project Summary
 
-In this project you will build and explain a small music recommender system.
+VibeMatch 1.0 recommends five songs from a catalog of 18 fictional tracks.
+It compares the listener's genre, mood, energy, and optional acoustic preference.
+It then reduces scores for repeated artists and genres to encourage variety.
+The terminal shows an ASCII table with each song's adjusted score and reasons.
 
-Your goal is to:
+I tested seven profiles, changed the scoring weights, and compared the results.
+The project shows how simple rules can suggest music and still miss parts of a listener's taste.
+See the [model card](model_card.md) for the data, limitations, and evaluation results.
 
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
+### Optional Features Implemented
 
-Replace this paragraph with your own summary of what your version does.
+- **Diversity and Fairness Logic:** Reduces a candidate's score by 1 point for
+  each already-selected song by the same artist and 0.5 points for each in the
+  same genre. This encourages variety without banning repeats or guaranteeing fairness.
+- **Visual Summary Table:** Displays recommendations in an ASCII table with
+  rank, song, artist, score, and reasons. Long text wraps, and diversity penalties
+  appear alongside the other score contributions. No extra library is needed.
 
 ---
 
@@ -80,18 +87,25 @@ user_prefs = {
 }
 ```
 
-The first four keys match the preferences in the planned scoring rule below. `likes_acoustic` expresses a preference for greater acousticness rather than a specific numerical target. The remaining three keys record targets for existing CSV features for future experiments; the current scoring design does not use them, and they are not fields in the starter `UserProfile` class. Instrumentalness, speechiness, liveness, and duration can be considered after those proposed features are added to the dataset. This dictionary is a design example; the starter app has not yet been updated to use it.
+The first four keys are used by the implemented scoring rule.
+`likes_acoustic` rewards greater acousticness rather than a specific target.
+The last three keys are ideas for future experiments; the current scorer ignores them.
+They are not fields in the `UserProfile` class.
+The Chill Lofi profile in `src/main.py` uses the four supported preferences.
 
 ### Critique of the profile
 
-The profile can clearly distinguish intense rock from chill lofi because genre, mood, and energy provide separate comparison signals. Applying the planned scoring rule by hand gives:
+The profile distinguishes chill lofi from intense rock using genre, mood, and energy.
+With the current weights, their preference scores are:
 
-| Song | Genre / mood / energy | Genre points | Mood points | Energy points | Acousticness bonus | Total |
+| Song | Genre / mood / energy | Genre points | Mood points | Energy points | Acousticness bonus | Preference score |
 | --- | --- | --- | --- | --- | --- | --- |
-| Midnight Coding | lofi / chill / 0.42 | 2.00 | 1.00 | 1.470 | 0.355 | 4.825 |
-| Storm Runner | rock / intense / 0.91 | 0 | 0 | 0.735 | 0.050 | 0.785 |
+| Midnight Coding | lofi / chill / 0.42 | 1.00 | 1.00 | 2.940 | 0.355 | 5.295 |
+| Storm Runner | rock / intense / 0.91 | 0 | 0 | 1.470 | 0.050 | 1.520 |
 
-For example, Midnight Coding earns `1.5 * (1 - abs(0.42 - 0.40)) = 1.47` energy points. These are expected scores from the design, not output from the unfinished recommender.
+Midnight Coding earns `3 * (1 - abs(0.42 - 0.40)) = 2.940` energy points.
+These are scores before list-dependent diversity penalties.
+Midnight Coding is selected first for Chill Lofi, so its final score remains 5.295.
 
 The profile is specific enough for a study session, but too narrow to represent all of a listener's tastes. Exact genre and mood matches strongly favor lofi labeled chill; a similarly gentle ambient or jazz song receives no genre bonus even if it suits studying. Also, an acousticness bonus does not guarantee a song has no distracting vocals, and the tempo, valence, and danceability targets have no effect until their scoring rules are added.
 
@@ -99,84 +113,94 @@ A later version could accept several preferred genres and moods, give partial cr
 
 ## How The System Works
 
-The planned recommender compares each song with a user's taste profile, gives it a compatibility score, and recommends the highest-scoring songs. The rules below describe the design; the starter recommendation functions still need to be implemented.
-
-Each `Song` stores an ID, title, artist, genre, mood, energy, tempo in beats per minute, valence (musical positivity), danceability, and acousticness. This scoring recipe uses genre, mood, energy, and acousticness. The ID identifies the song and breaks score ties, while the title and artist identify it in the results. The remaining features are available for future experiments.
+The recommender uses fixed rules rather than a trained model.
+`load_songs` reads the CSV. `score_song` measures one song's preference match.
+`recommend_songs` chooses the list and applies diversity penalties.
+The CLI and the `Recommender` class use this shared logic.
 
 The `UserProfile` stores four preferences:
 
-- `favorite_genre`: the user's preferred genre.
-- `favorite_mood`: the user's preferred mood.
-- `target_energy`: the user's preferred energy level, from 0 to 1.
-- `likes_acoustic`: whether to give more acoustic songs a bonus. A value of `False` means no acoustic preference.
+- `favorite_genre`: one preferred genre.
+- `favorite_mood`: one preferred mood.
+- `target_energy`: the desired energy from 0 to 1.
+- `likes_acoustic`: whether more acoustic songs receive a bonus.
+
+The dictionary interface also accepts `genre`, `mood`, and `energy`, as used by the CLI.
+Each song has identifying information and five numerical features.
+Tempo, valence, and danceability are available in the data but do not affect scoring.
 
 ### Scoring logic design
 
-The attributes in `data/songs.csv` support several point-weighting strategies. Each strategy below uses exact genre and mood matches, energy similarity `1 - abs(song.energy - user.target_energy)`, and an optional acousticness bonus. The numerical columns use a 0–1 scale, so their weights set their maximum point contributions.
+I considered several weighting strategies:
 
-| Strategy | Genre match | Mood match | Energy similarity weight | Acousticness weight | Tradeoff |
+| Strategy | Genre | Mood | Energy weight | Acousticness weight | Role |
 | --- | --- | --- | --- | --- | --- |
-| Genre-led | 3.0 | 1.0 | 0.5 | 0.5 | Strongly favors familiar genres, even when intensity is less suitable. |
-| Mood-led | 1.0 | 2.0 | 1.5 | 0.5 | Prioritizes the listening occasion and allows more genre variety. |
-| Balanced (final choice) | 2.0 | 1.0 | 1.5 | 0.5 | Gives genre the strongest individual signal while allowing energy and mood to influence the result. |
+| Genre-led | 3.0 | 1.0 | 0.5 | 0.5 | Design idea; favors familiar genres. |
+| Mood-led | 1.0 | 2.0 | 1.5 | 0.5 | Design idea; emphasizes mood. |
+| Original baseline | 2.0 | 1.0 | 1.5 | 0.5 | Used for the first stress test. |
+| Current weight shift | 1.0 | 1.0 | 3.0 | 0.5 | Used by the current app, with diversity penalties. |
 
-These are design alternatives, not measured experiment results. The final recipe preserves the earlier 4:2:3:1 proportions at half the point scale, so its rankings are unchanged. Weights belong in the scoring rule rather than in the CSV: song attributes stay fixed, while a song's score depends on the user's profile.
+The first two strategies were design ideas, not measured experiments.
+The last two were compared using the same seven profiles.
+Weights belong in the code because a song's score depends on the listener.
+The song data itself stays unchanged.
 
 ### Finalized Algorithm Recipe
 
-1. Read the songs from `data/songs.csv` and the user's genre, mood, energy, and acoustic preferences.
-2. Loop through every song, starting its score at zero. Apply the four scoring rules below and record the reasons for its points.
-3. Save each song with its total score and reasons.
-4. Sort all songs by total score from highest to lowest, breaking ties by lower song ID. Use full precision when sorting.
-5. Return the top `k` songs (5 by default), or all songs if fewer are available, with their scores and explanations.
+1. Load the catalog and user preferences.
+2. Score every song once using the rules below. Save its reasons.
+3. Start an empty recommendation list.
+4. For every remaining song, subtract penalties based on the songs already selected.
+5. Choose the highest adjusted score. Break ties by lower song ID.
+6. Repeat until there are five results, or no songs remain.
+7. Display the results in a table with scores and reasons.
 
-For each song, use these finalized weights:
-
-| Feature | Rule | Maximum points |
+| Feature | Rule | Maximum preference points |
 | --- | --- | --- |
-| Genre | Award 2.0 points for a match, ignoring capitalization and surrounding whitespace; otherwise award 0. | 2.0 |
-| Mood | Award 1.0 point for a match, ignoring capitalization and surrounding whitespace; otherwise award 0. | 1.0 |
-| Energy | Award `1.5 * (1 - abs(song.energy - user.target_energy))`. | 1.5 |
-| Acousticness | Award `0.5 * song.acousticness` when `likes_acoustic` is `True`; otherwise award 0. | 0.5 |
+| Genre | Award 1 point for a match, ignoring capital letters and surrounding spaces. | 1.0 |
+| Mood | Award 1 point for a match, ignoring capital letters and surrounding spaces. | 1.0 |
+| Energy | Award `3 * (1 - abs(song.energy - user.target_energy))`. | 3.0 |
+| Acousticness | Award `0.5 * song.acousticness` when requested. | 0.5 |
 
-Genre counts twice as much as mood because this design treats genre as the strongest preference. A perfect energy match earns 1.5 points, so intensity matters more than mood alone but less than genre alone. Mood and energy together can outweigh a genre match, allowing a suitable song from another genre to compete. Acousticness provides a smaller bonus and only applies when requested. Tempo, valence, and danceability contribute no points in this recipe. These weights are the finalized starting design and can be revisited after evaluating recommendations.
+Energy rewards closeness, not high energy by itself.
+For a target of 0.70, energy 0.65 earns 2.850 points and energy 0.90 earns 2.400.
+An exact energy match earns 3 points. A difference of 1 earns zero.
+Energy and acousticness values must be between zero and one.
 
-Add the four contributions to get the total score. Require song energy, target energy, and acousticness to be between 0 and 1. The total score then ranges from 0 to 5, or 0 to 4.5 when `likes_acoustic` is `False`. The energy rule rewards closeness rather than simply rewarding higher energy. For example, with a target energy of 0.70, a song with energy 0.65 earns `1.5 * (1 - 0.05) = 1.425` energy points, while a song with energy 0.90 earns `1.5 * (1 - 0.20) = 1.20` points. An exact energy match earns 1.5 points, and a difference of 1.0 earns 0. Keep full precision for ranking and round only for display.
+Preference scores range from 0 to 5.5 with the acoustic preference, or 0 to 5 without it.
+The next selection loses 1 point per earlier song by the same artist and
+0.5 points per earlier song in the same genre.
+Both penalties can apply, and labels ignore capital letters and surrounding spaces.
+Each round calculates penalties from the original preference scores.
+Adjusted scores can be negative; repeats remain eligible.
+The app uses full precision for selection and shows three decimal places.
+It preserves the original catalog.
 
-The ranking rule scores every song, sorts the songs by total score from highest to lowest, and returns the top `k` songs (5 by default). If two songs have the same score, the song with the lower ID comes first so the results are predictable. If fewer than `k` songs are available, all available songs are returned.
+### Observed biases
 
-We need both rules because scoring measures how well one song fits the user, while ranking compares those scores to choose a list of recommendations. Following clean code principles, scoring and ranking should have separate responsibilities, and weights should use named constants so they are easy to understand and adjust.
-
-### Expected biases
-
-This system may over-prioritize genre because a genre match earns twice as many points as a mood match, pushing down great songs from other genres that fit the user's mood. Exact genre and mood labels also miss similarities such as "chill" versus "relaxed." The small catalog gives some tastes more choices than others: lofi has three songs, while many genres have only one. When enabled, the acousticness bonus favors acoustic recordings even though electronic music can also suit studying. These are expected limitations of the design, not findings from completed evaluation.
+Exact labels miss related moods, such as sad and melancholic.
+Energy has more weight than mood, so a good energy match can outweigh a mood mismatch.
+The small catalog has more lofi and pop choices than choices in other genres.
+Diversity penalties reduce repetition but can also move a favorite genre down the list.
+See [the evaluation](model_card.md#7-evaluation) for the experiments behind these observations.
 
 ### Visualize the design: data flow
 
-This map is a planning aid for the scoring and ranking logic before implementation.
-
 ```mermaid
 flowchart TD
-    A["INPUT: User preferences<br/>Favorite genre, favorite mood,<br/>target energy, likes acoustic, and K"]
-    B["Read data/songs.csv into a song list"]
-    C["PROCESS: Take the next song"]
-    D["Judge this song against user preferences<br/>Genre match: +2.0<br/>Mood match: +1.0<br/>Energy: 1.5 × similarity<br/>Acoustic bonus: 0.5 × acousticness if requested"]
-    E["Save song, total score, and reasons"]
-    F{"More songs?"}
-    G["RANKING: Sort all scored songs<br/>Highest score first; lower ID breaks ties"]
-    H["OUTPUT: Top K recommendations<br/>Song title, score, and explanation"]
-    A --> D
-    B --> C
-    C --> D
-    D --> E
-    E --> F
-    F -- Yes --> C
-    F -- No --> G
-    G --> H
-    A -- K --> H
+    A["User preferences and catalog"] --> B["Score every song once<br/>Genre: up to 1<br/>Mood: up to 1<br/>Energy: up to 3<br/>Acousticness: up to 0.5"]
+    B --> C["Start an empty results list"]
+    C --> D["Adjust remaining scores<br/>Subtract 1 per earlier artist match<br/>Subtract 0.5 per earlier genre match"]
+    D --> E["Select highest adjusted score<br/>Lower ID breaks ties"]
+    E --> F{"Enough results or no songs left?"}
+    F -- No --> D
+    F -- Yes --> G["Display table<br/>Rank, song, artist, score, reasons"]
 ```
 
-For example, the CSV row for **Midnight Coding** becomes one song in the loop. With the study profile above (lofi, chill, target energy 0.40, acoustic preference enabled), it earns `2.0 + 1.0 + 1.47 + 0.355 = 4.825` points. Save that song with its score and reasons, then repeat for every remaining song. Only after all songs are scored do we sort the full list and select the top K; Midnight Coding appears in the output if its rank is within K.
+For Chill Lofi, Midnight Coding starts with 5.295 points and is selected first.
+Library Rain starts with 5.280 points, then loses 0.500 because lofi is already represented.
+Its final score is 4.780. This shows why scoring a song and choosing a varied list
+are separate steps.
 
 ---
 
@@ -206,100 +230,183 @@ python -m src.main
 
 ### Running Tests
 
-Run the starter tests with:
+Run the scoring, ranking, diversity, and class-interface tests with:
 
 ```bash
-pytest
+python -m pytest -q
 ```
 
-You can add more tests in `tests/test_recommender.py`.
+The current suite has 34 passing tests. Tests are in the `tests/` folder.
 
 ---
 
 ## Sample Recommendation Output
 
-Running `python -m src.main` from the project root produces:
+Run `python -m src.main` from the project root to view all seven profiles.
+The terminal uses a simple ASCII table made with Python's standard library.
+No extra package is needed. Each song has a rank, title, artist, adjusted score,
+and reasons. Long titles and explanations wrap onto extra lines rather than
+being cut off. Scores show three decimal places, including diversity deductions.
+
+The first profile currently produces:
 
 ```text
 ============================================================
-MUSIC RECOMMENDER
+MUSIC RECOMMENDER | High-Energy Pop
 ============================================================
 Loaded songs: 18
-Profile: genre=pop | mood=happy | energy=0.80
+Profile: genre=pop | mood=happy | energy=0.80 | likes_acoustic=False
 
 Top 5 recommendations
-------------------------------------------------------------
-1. Sunrise City - Neon Echo
-   Final score: 4.470
-   Reasons:
-     - genre match (+2.0)
-     - mood match (+1.0)
-     - energy similarity (+1.470)
-
-2. Gym Hero - Max Pulse
-   Final score: 3.305
-   Reasons:
-     - genre match (+2.0)
-     - energy similarity (+1.305)
-
-3. Rooftop Lights - Indigo Parade
-   Final score: 2.440
-   Reasons:
-     - mood match (+1.0)
-     - energy similarity (+1.440)
-
-4. Concrete Crown - Verse Atlas
-   Final score: 1.485
-   Reasons:
-     - energy similarity (+1.485)
-
-5. Night Drive Loop - Neon Echo
-   Final score: 1.425
-   Reasons:
-     - energy similarity (+1.425)
++------+--------------------------+--------------------+---------+------------------------------------------+
+| Rank | Song                     | Artist             | Score   | Reasons                                  |
++------+--------------------------+--------------------+---------+------------------------------------------+
+| 1    | Sunrise City             | Neon Echo          | 4.940   | - genre match (+1.0)                     |
+|      |                          |                    |         | - mood match (+1.0)                      |
+|      |                          |                    |         | - energy similarity (+2.940)             |
++------+--------------------------+--------------------+---------+------------------------------------------+
+| 2    | Rooftop Lights           | Indigo Parade      | 3.880   | - mood match (+1.0)                      |
+|      |                          |                    |         | - energy similarity (+2.880)             |
++------+--------------------------+--------------------+---------+------------------------------------------+
+| 3    | Gym Hero                 | Max Pulse          | 3.110   | - genre match (+1.0)                     |
+|      |                          |                    |         | - energy similarity (+2.610)             |
+|      |                          |                    |         | - repeated genre penalty (-0.500)        |
++------+--------------------------+--------------------+---------+------------------------------------------+
+| 4    | Concrete Crown           | Verse Atlas        | 2.970   | - energy similarity (+2.970)             |
++------+--------------------------+--------------------+---------+------------------------------------------+
+| 5    | Brass Parade             | Sol del Barrio     | 2.730   | - energy similarity (+2.730)             |
++------+--------------------------+--------------------+---------+------------------------------------------+
 ```
 
-Sunrise City ranks first because it matches both pop and happy, with energy
-0.82 close to the target of 0.80. Gym Hero matches pop but not happy, while
-Rooftop Lights matches happy but not pop, so they rank second and third.
-Scores are rounded to three decimal places for display; ranking uses full precision.
+Sunrise City leads because it matches pop, happy, and the requested energy.
+Gym Hero still matches pop and energy, but receives a 0.500-point deduction
+because Sunrise City already represents pop. Every reason stays visible in
+the table, including any repeated-artist or repeated-genre penalty.
+
+### Reusable table-formatting prompt
+
+```text
+Improve src/main.py's terminal output using a simple ASCII table or tabulate.
+The table must include Rank, Song, Artist, Score, and Reasons columns for
+every recommendation. Reasons must show every scoring contribution and every
+diversity penalty, not just the total score. Keep each reason on its own line
+inside the song's row. Wrap long titles, artist names, and reasons without
+truncating them. Display adjusted scores to three decimal places. Keep the
+profile name and preferences above the table. Preserve the recommendation
+order and scoring logic. Handle an empty list with a clear message. Prefer
+Python's standard library so the project needs no additional dependency.
+```
+
+The [model card evaluation](model_card.md#7-evaluation) preserves earlier
+experiment outputs and a current table example.
 
 ---
 
 ## Experiments You Tried
 
-Use this section to document the experiments you ran. For example:
-
-- What happened when you changed the weight on genre from 2.0 to 0.5
-- What happened when you added tempo or valence to the score
-- How did your system behave for different types of users
+Tested a weight shift: genre bonus 2.0 -> 1.0 and energy weight 1.5 -> 3.0.
+Before diversity penalties were added, three of seven profiles changed order;
+all seven retained the same five songs.
+Midnight Coding replaced Library Rain as the Chill Lofi leader, and Rooftop
+Lights moved above Gym Hero for both pop profiles. This shows sensitivity to
+weights; improved accuracy cannot be established without listener feedback.
+The experimental weights remain active. See the model card evaluation for
+verified math, complete comparisons, and captured experimental terminal output.
 
 ---
 
+## Diversity and Fairness Logic
+
+The recommender builds the list one song at a time. Each earlier song by the
+same artist costs a candidate 1 point. Each earlier song in the same genre
+costs another 0.5 points. It recalculates these deductions from the original
+preference score before each choice. Both deductions can apply together.
+The terminal shows the adjusted score and the reasons for each deduction.
+
+This is a soft penalty, so it encourages variety without banning repeats.
+It does not guarantee equal representation or listener satisfaction.
+Penalty weights are keyword options on `recommend_songs`; set both to zero
+to compare with the earlier ranking. Negative final scores are allowed when
+few alternatives exist. The input song data is preserved.
+
+### Reusable implementation prompt
+
+```text
+Update recommend_songs to encourage variety while preserving score_song's
+preference scoring. Score every song once, then build the top-k list one
+selection at a time. Before each selection, calculate each remaining song's
+adjusted score as its original preference score minus 1.0 point for every
+already-selected song by the same artist and minus 0.5 points for every
+already-selected song in the same genre. Compare artist and genre labels
+without capitalization or surrounding spaces. Apply both deductions when
+both repeat. Choose the highest adjusted score, breaking ties by lower song
+ID, then update the artist and genre counts. Recompute penalties from the
+original scores each round. Return adjusted scores with explanations that
+show the deductions. Keep repeats eligible, preserve input data, and allow
+negative scores. Make both penalty weights configurable, with zero disabling
+a penalty; reject negative or non-finite weights. Test that an unrelated
+artist can outrank a slightly better repeated artist, that genre repeats
+are penalized, and that penalties grow with the number already selected.
+```
+
+**Implementation response**
+
+This rule is implemented in `src/recommender.py`. Each song receives a
+preference score once. The recommender then fills the list one place at a time.
+It counts the artists and genres already selected and subtracts the repeat
+penalties before choosing the next song. Equal adjusted scores favor the
+lower song ID. Artist and genre comparisons ignore capital letters and spaces.
+
+For example, Focus Flow starts with 4.390 points for Chill Lofi. After
+Midnight Coding and Library Rain are selected, it loses 1 point because
+LoRoom is already represented and 1 point because two lofi songs are present.
+Its adjusted score becomes 2.390. Desert Compass keeps its 3.200 points and
+earns a place instead. This adds variety while keeping each deduction visible
+in the Reasons column.
+
+Both penalties can be changed or set to zero. Negative and non-finite penalty
+weights are rejected. Repeats remain eligible, and the original song data is
+preserved. The existing checks and diversity tests passed: 34 tests in total.
+
+See [the model card](model_card.md#7-evaluation) for a comparison of all seven
+profiles and a current terminal output example. Chill Lofi increases from
+four to five artists and from three to four genres in its top five.
+
 ## Limitations and Risks
 
-Summarize some limitations of your recommender.
+- The catalog has only 18 fictional songs. Lofi has three songs, pop has two,
+  and every other genre has one. Some listeners have fewer matching choices.
+- Mood matches require the same label. A request for sad gets no mood points,
+  even for songs labeled melancholic or solemn.
+- Energy can earn up to 3 points, while mood earns only 1. A similar energy
+  level can outweigh an emotional mismatch. Lyrics, language, tempo, valence,
+  and danceability do not affect the score.
+- Diversity penalties encourage different artists and genres, but may push
+  down songs that fit a listener who wants only one genre. More variety does
+  not automatically mean fairer or better recommendations.
+- The same preferences return the same list. There is no learning from feedback
+  or random exploration, so users may keep seeing the same songs.
+- Scores are rule-based points, not probabilities of enjoyment. Without
+  listener ratings, the experiments cannot establish recommendation accuracy.
 
-Examples:
-
-- It only works on a tiny catalog
-- It does not understand lyrics or language
-- It might over favor one genre or mood
-
-You will go deeper on this in your model card.
+See the [model card](model_card.md) for the supporting experiments and examples.
 
 ---
 
 ## Reflection
 
-Read and complete `model_card.md`:
+I learned that simple rules can make suggestions feel personal. The system
+turns song features and user preferences into points, then uses those points
+to choose a list. Changing the weights moved Midnight Coding above Library
+Rain for Chill Lofi. This showed me that a ranking reflects design choices,
+not a guaranteed measure of what someone will enjoy. AI tools helped me build
+profiles, compare results, and explain the behavior. I still needed to check
+the calculations, actual song labels, and terminal output against those explanations.
 
-[**Model Card**](model_card.md)
-
-Write 1 to 2 paragraphs here about what you learned:
-
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
-
-
-
+I also learned that bias can come from both the catalog and the scoring rules.
+A listener asking for sad music gets no mood match because that label is missing.
+Gym Hero can still appear for happy pop because genre and energy earn points
+even when mood does not match. The diversity penalty creates space for other
+artists, but it can also reduce how closely the list follows a favorite genre.
+Next, I would add more songs and related mood labels, then collect listener
+feedback to check whether the changes improve the listening experience.

@@ -1,11 +1,17 @@
 import csv
+from collections import Counter
+from math import isfinite
 from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
-GENRE_MATCH_POINTS = 2.0
+# Sensitivity experiment: halve the baseline genre bonus (2.0 -> 1.0)
+# and double the baseline energy weight (1.5 -> 3.0).
+GENRE_MATCH_POINTS = 1.0
 MOOD_MATCH_POINTS = 1.0
-ENERGY_WEIGHT = 1.5
+ENERGY_WEIGHT = 3.0
 ACOUSTICNESS_WEIGHT = 0.5
+ARTIST_REPEAT_PENALTY = 1.0
+GENRE_REPEAT_PENALTY = 0.5
 
 @dataclass
 class Song:
@@ -44,12 +50,15 @@ class Recommender:
         self.songs = songs
 
     def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
-        # TODO: Implement recommendation logic
-        return self.songs[:k]
+        songs_by_id = {song.id: song for song in self.songs}
+        results = recommend_songs(asdict(user), [asdict(song) for song in self.songs], k)
+        return [songs_by_id[song["id"]] for song, _, _ in results]
 
     def explain_recommendation(self, user: UserProfile, song: Song) -> str:
-        # TODO: Implement explanation logic
-        return "Explanation placeholder"
+        # List-dependent penalties are included by recommend_songs; this method
+        # explains one song's preference match without a selected-list context.
+        _, reasons = score_song(asdict(user), asdict(song))
+        return "; ".join(reasons)
 
 def load_songs(csv_path: str) -> List[Dict]:
     """Load song dictionaries with integer IDs and floating-point audio attributes."""
@@ -103,15 +112,57 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
 
     return score, reasons
 
-def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tuple[Dict, float, str]]:
-    """Return the top k song-score-explanation tuples, breaking score ties by ID."""
+def recommend_songs(
+    user_prefs: Dict,
+    songs: List[Dict],
+    k: int = 5,
+    *,
+    artist_penalty: float = ARTIST_REPEAT_PENALTY,
+    genre_penalty: float = GENRE_REPEAT_PENALTY,
+) -> List[Tuple[Dict, float, str]]:
+    """Select songs greedily using scores reduced by prior artist/genre counts.
+
+    Each earlier artist match costs artist_penalty points; each earlier genre
+    match costs genre_penalty points. Both apply when both labels repeat.
+    Returned scores include the penalties at selection time and may be negative.
+    Set both penalties to zero to reproduce ranking by preference score alone.
+    """
+    for name, penalty in (("artist_penalty", artist_penalty), ("genre_penalty", genre_penalty)):
+        if not isfinite(penalty) or penalty < 0:
+            raise ValueError(f"{name} must be finite and nonnegative")
     if k <= 0:
         return []
 
     scored_songs = []
     for song in songs:
         score, reasons = score_song(user_prefs, song)
-        scored_songs.append((song, score, "; ".join(reasons)))
+        scored_songs.append((song, score, reasons))
 
-    ranked_songs = sorted(scored_songs, key=lambda rec: (-rec[1], rec[0]["id"]))
-    return ranked_songs[:k]
+    artist_counts = Counter()
+    genre_counts = Counter()
+    recommendations = []
+    while scored_songs and len(recommendations) < k:
+        candidates = []
+        for index, (song, base_score, reasons) in enumerate(scored_songs):
+            artist = song["artist"].strip().casefold()
+            genre = song["genre"].strip().casefold()
+            artist_cost = artist_penalty * artist_counts[artist]
+            genre_cost = genre_penalty * genre_counts[genre]
+            adjusted_reasons = list(reasons)
+            if artist_cost:
+                adjusted_reasons.append(f"repeated artist penalty (-{artist_cost:.3f})")
+            if genre_cost:
+                adjusted_reasons.append(f"repeated genre penalty (-{genre_cost:.3f})")
+            candidates.append((
+                index, base_score - artist_cost - genre_cost, adjusted_reasons,
+            ))
+
+        index, score, reasons = min(
+            candidates, key=lambda item: (-item[1], scored_songs[item[0]][0]["id"])
+        )
+        song, _, _ = scored_songs.pop(index)
+        recommendations.append((song, score, "; ".join(reasons)))
+        artist_counts[song["artist"].strip().casefold()] += 1
+        genre_counts[song["genre"].strip().casefold()] += 1
+
+    return recommendations
